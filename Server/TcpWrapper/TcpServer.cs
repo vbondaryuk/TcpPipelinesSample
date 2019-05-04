@@ -5,69 +5,68 @@ using System.Threading.Tasks;
 
 namespace Tcp.Server.TcpWrapper
 {
-	public class TcpServer : IDisposable
-	{
-		private readonly string ipAddress;
-		private readonly int port;
-		private readonly TcpListener listener;
-		private bool isStarted;
+    public class TcpServer : IDisposable
+    {
+        private readonly string _ipAddress;
+        private readonly TcpListener _listener;
+        private readonly int _port;
+        private bool _isStarted;
 
-		public TcpServer(string ipAddress, int port)
-		{
-			this.ipAddress = ipAddress;
-			this.port = port;
-			IPAddress address = IPAddress.Parse(ipAddress);
-			listener = new TcpListener(address, port);
-			isStarted = false;
-		}
+        public TcpServer(string ipAddress, int port)
+        {
+            _ipAddress = ipAddress;
+            _port = port;
+            var address = IPAddress.Parse(ipAddress);
+            _listener = new TcpListener(address, port);
+            _isStarted = false;
+        }
 
-		public void Start()
-		{
-			Console.WriteLine($"Tcp server was started on:{ipAddress}:{port}");
-			listener.Start();
-			isStarted = true;
+        public void Dispose()
+        {
+            Stop();
+        }
 
-			Task.Run(() => Listen());
-		}
+        public void Start()
+        {
+            Console.WriteLine($"Tcp server was started on: {_ipAddress}:{_port}");
+            _listener.Start();
+            _isStarted = true;
 
-		public void Stop()
-		{
-			if (isStarted)
-			{
-				listener.Stop();
-				isStarted = false;
-			}
-		}
+            _ = Listen();
+        }
 
-		public event EventHandler<TcpEventArg> ClientConnected;
+        public void Stop()
+        {
+            if (_isStarted)
+            {
+                _listener.Stop();
+                _isStarted = false;
+            }
+        }
 
-		public void Dispose()
-		{
-			Stop();
-		}
+        public event EventHandler<TcpEventArg> ClientConnected;
 
-		private void Listen()
-		{
-			if (listener != null)
-			{
-				while (true)
-				{
-					Console.WriteLine("Waiting for a client...");
-					TcpClient client = listener.AcceptTcpClient();
+        private async Task Listen()
+        {
+            if (_listener == null)
+                return;
 
-					Console.WriteLine("Client connected.");
-					OnClientConectedEvent(client);
-					client.GetStream().Dispose();
-					Console.WriteLine("Client disposed.");
-				}
-			}
-		}
+            while (true)
+            {
+                Console.WriteLine("Waiting for a client...");
+                var client = await _listener.AcceptTcpClientAsync();
 
-		private void OnClientConectedEvent(TcpClient client)
-		{
-			var tcpEventArg = new TcpEventArg(client);
-			EventHandler<TcpEventArg> clientConnectedEvent = ClientConnected;
-			clientConnectedEvent?.Invoke(this, tcpEventArg);
-		}
-	}
+                Console.WriteLine("Client connected.");
+                OnClientConnectedEvent(client);
+                Console.WriteLine("Client disposed.");
+            }
+        }
+
+        private void OnClientConnectedEvent(TcpClient client)
+        {
+            var tcpEventArg = new TcpEventArg(client);
+            var clientConnectedEvent = ClientConnected;
+            clientConnectedEvent?.Invoke(this, tcpEventArg);
+        }
+    }
 }

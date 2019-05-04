@@ -10,100 +10,101 @@ using Tcp.Server.TcpWrapper;
 
 namespace Tcp.Server
 {
-	static class Program
-	{
-		private static IConfiguration _configuration;
-		static void Main()
-		{
-			_configuration = ReadConfiguration();
-			string host = _configuration["tcp:host"];
-			int port = Int32.Parse(_configuration["tcp:port"]);
+    static class Program
+    {
+        private static IConfiguration _configuration;
+        static void Main()
+        {
+            _configuration = ReadConfiguration();
+            string host = _configuration["tcp:host"];
+            int port = int.Parse(_configuration["tcp:port"]);
 
-			using (var tcpServer = new TcpServer(host, port))
-			{
-				tcpServer.Start();
-				tcpServer.ClientConnected += Listen;
-				Console.WriteLine("Press enter to exit");
-				Console.ReadKey();
-			}
-		}
-
-
-		private static IConfiguration ReadConfiguration()
-		{
-			var builder = new ConfigurationBuilder()
-				.SetBasePath(Directory.GetCurrentDirectory())
-				.AddJsonFile("appsettings.json");
-
-			return builder.Build();
-		}
+            using (var tcpServer = new TcpServer(host, port))
+            {
+                tcpServer.Start();
+                tcpServer.ClientConnected += Listen;
+                Console.WriteLine("Press enter to exit");
+                Console.ReadKey();
+            }
+        }
 
 
-		private static void Listen(object sender, TcpEventArg e)
-		{
-			string file = _configuration["fileForTransfer"];
+        private static IConfiguration ReadConfiguration()
+        {
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json");
 
-			var pipe = new Pipe(new PipeOptions(minimumSegmentSize: 8 * 1024));
-			Task.WaitAll(
-				FillPipeAsync(pipe.Writer, file),
-				SendToClientAsync(pipe.Reader, e.TcpClient)
-			);
-		}
+            return builder.Build();
+        }
 
-		private static async Task FillPipeAsync(PipeWriter writer, string path)
-		{
-			const int minimumBufferSize = 512;
 
-			// This turns off internal file stream buffering
-			using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1))
-			{
-				while (true)
-				{
-					try
-					{
-						Memory<byte> memory = writer.GetMemory(minimumBufferSize);
-						int readBytes = await fileStream.ReadAsync(memory);
+        private static void Listen(object sender, TcpEventArg e)
+        {
+            string file = _configuration["fileForTransfer"];
 
-						if (readBytes == 0)
-							break;
+            Pipe pipe = new Pipe(new PipeOptions(minimumSegmentSize: 8 * 1024));
+            _ = FillPipeAsync(pipe.Writer, file);
+            _ = SendToClientAsync(pipe.Reader, e.TcpClient);
+        }
 
-						writer.Advance(readBytes);
+        private static async Task FillPipeAsync(PipeWriter writer, string path)
+        {
+            const int minimumBufferSize = 512;
 
-						// Make the data available to the PipeReader
-						if (!await writer.Flush())
-							break;
-					}
-					catch (Exception ex)
-					{
-						writer.Complete(ex);
-						break;
-					}
-				}
-			}
+            // This turns off internal file stream buffering
+            using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1))
+            {
+                while (true)
+                {
+                    try
+                    {
+                        Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+                        int readBytes = await fileStream.ReadAsync(memory);
 
-			writer.Complete();
-		}
+                        if (readBytes == 0)
+                            break;
 
-		static async Task SendToClientAsync(PipeReader reader, TcpClient client)
-		{
-			while (true)
-			{
-				ReadResult readResult = await reader.ReadAsync();
-				ReadOnlySequence<byte> buffer = readResult.Buffer;
+                        writer.Advance(readBytes);
 
-				if (buffer.IsEmpty && readResult.IsCompleted)
-					break;
+                        // Make the data available to the PipeReader
+                        if (!await writer.Flush())
+                            break;
+                    }
+                    catch (Exception ex)
+                    {
+                        writer.Complete(ex);
+                        break;
+                    }
+                }
+            }
 
-				foreach (ReadOnlyMemory<byte> segment in buffer)
-					await client.GetStream().WriteAsync(segment);
+            writer.Complete();
+        }
 
-				reader.AdvanceTo(buffer.End);
+        static async Task SendToClientAsync(PipeReader reader, TcpClient client)
+        {
+            Stream tcpStream = client.GetStream();
+            while (true)
+            {
+                ReadResult readResult = await reader.ReadAsync();
+                ReadOnlySequence<byte> buffer = readResult.Buffer;
 
-				if (readResult.IsCompleted)
-					break;
-			}
+                if (buffer.IsEmpty && readResult.IsCompleted)
+                    break;
 
-			reader.Complete();
-		}
-	}
+                foreach (ReadOnlyMemory<byte> segment in buffer)
+                    await tcpStream.WriteAsync(segment);
+
+                reader.AdvanceTo(buffer.End);
+
+                if (readResult.IsCompleted)
+                    break;
+            }
+
+            await tcpStream.FlushAsync();
+            tcpStream.Dispose();
+            reader.Complete();
+        }
+    }
 }
